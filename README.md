@@ -1,20 +1,20 @@
-# AI Fitness App 💪
+# AI Fitness App 
 
 A comprehensive fitness application built with React Native (Expo) and FastAPI, featuring AI-powered meal planning and workout generation.
 
-## ✨ Features
+##  Features
 
-- 🔐 User Authentication (Signup/Login)
-- 📱 Cross-platform mobile app (Android & iOS)
-- 🍎 AI-powered meal plan generation
-- 🏋️ AI-powered workout plan generation
-- 💊 Supplement management system
-- 👤 User profile management with BMI/BMR calculations
-- ⭐ Favorites system
-- 🔔 Push notifications
-- 📊 Admin dashboard for user management
+-  User Authentication (Signup/Login)
+-  Cross-platform mobile app (Android & iOS)
+-  AI-powered meal plan generation
+-  AI-powered workout plan generation
+-  Supplement management system
+-  User profile management with BMI/BMR calculations
+-  Favorites system
+-  Push notifications
+-  Admin dashboard for user management
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 ### Frontend
 - **React Native** with **Expo**
@@ -32,7 +32,7 @@ A comprehensive fitness application built with React Native (Expo) and FastAPI, 
 - **JWT** (Authentication)
 - **bcrypt** (Password hashing)
 
-## 📋 Prerequisites
+##  Prerequisites
 
 Before you begin, ensure you have the following installed:
 
@@ -46,7 +46,7 @@ Before you begin, ensure you have the following installed:
 - **Expo Go** app on your phone (iOS/Android) - [iOS App Store](https://apps.apple.com/app/expo-go/id982107779) | [Google Play Store](https://play.google.com/store/apps/details?id=host.exp.exponent)
 - OR **Android Studio** / **Xcode** for emulator/simulator
 
-## 🚀 Installation & Setup
+##  Installation & Setup
 
 ### 1. Clone the Repository
 
@@ -177,7 +177,7 @@ This will open the Expo developer tools in your browser. You can:
 - Press `a` for Android emulator
 - Press `i` for iOS simulator
 
-## 📁 Project Structure
+##  Project Structure
 
 ```
 Ai-Fitness-App/
@@ -240,7 +240,7 @@ Ai-Fitness-App/
 
 For detailed API documentation, visit: **http://localhost:8000/docs**
 
-## 🧪 Testing
+##  Testing
 
 ### Test Backend Connection
 
@@ -308,7 +308,7 @@ python backend/test_login.py
 - Clean build: `cd android && ./gradlew clean`
 - Check Android SDK installation in Android Studio
 
-## 📝 Environment Variables
+##  Environment Variables
 
 Create a `.env` file in the `backend` directory (optional):
 
@@ -320,20 +320,20 @@ MYSQL_PORT=3306
 MYSQL_DATABASE=fitness_ai
 ```
 
-## 🤝 Contributing
+##  Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-## 📄 License
+##  License
 
 This project is licensed under the MIT License.
 
-## 👤 Author
+##  Author
 
 **Hassan Kanso**
 - Email: hassankanso094@gmail.com
 
-## 🙏 Acknowledgments
+##  Acknowledgments
 
 - FastAPI community
 - React Native and Expo teams
@@ -341,5 +341,5 @@ This project is licensed under the MIT License.
 
 ---
 
-**Happy Coding! 💻✨**
+
 
