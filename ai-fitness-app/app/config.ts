@@ -19,4 +19,4 @@
  */
 
 export const BASE_URL =
-  process.env.BASE_URL || "http://192.168.1.102:8000";
+  process.env.BASE_URL || "http://192.168.1.103:8000";

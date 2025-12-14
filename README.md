@@ -51,8 +51,9 @@ Before you begin, ensure you have the following installed:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/yourusername/Ai-Fitness-App.git
-cd Ai-Fitness-App
+git clone https://github.com/Hassankanso-driod/ai-fitness-app.git
+cd ai-fitness-app
+
 ```
 
 ### 2. Backend Setup
