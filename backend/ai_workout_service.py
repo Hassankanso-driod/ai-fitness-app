@@ -17,9 +17,23 @@ import models
 import schemas
 
 # Load .env (OPENAI_API_KEY, OPENAI_WORKOUT_MODEL)
+# Load .env (OPENAI_API_KEY, OPENAI_WORKOUT_MODEL)
 load_dotenv()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+_client: Optional[OpenAI] = None
+
+def get_openai_client() -> OpenAI:
+    """
+    Lazy OpenAI client init.
+    Avoids failing at import time in CI where OPENAI_API_KEY is not set.
+    """
+    global _client
+    if _client is None:
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY is not set")
+        _client = OpenAI(api_key=api_key)
+    return _client
 
 PROMPT_VERSION = "workout_weekly_v1.1"
 
