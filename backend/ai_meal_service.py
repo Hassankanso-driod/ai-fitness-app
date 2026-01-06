@@ -1,60 +1,85 @@
 # ai_meal_service.py
 import os
 import json
+from datetime import datetime
 from typing import Dict, Any, Optional
 
-from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 from openai import OpenAI
+from sqlalchemy.orm import Session
 
 import models
 import schemas
 
-# تحميل .env (حتى نقرأ OPENAI_API_KEY بسهولة)
 load_dotenv()
-
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+PROMPT_VERSION = "v2.0-mealplan-options-json"
 
-def generate_weekly_meal_plan(
-    db: Session,
-    payload: schemas.AIMealPlanRequest
-) -> Dict[str, Any]:
+
+def _normalize_csv(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    return ", ".join([x.strip() for x in value.split(",") if x.strip()])
+
+
+def generate_and_save_weekly_meal_plan(db: Session, payload: schemas.AIMealPlanRequest) -> Dict[str, Any]:
     """
-    Uses GPT-4.1-mini to generate a 7-day meal plan
-    based on an existing user in the DB.
-    - Reads user from users table
-    - Sends profile + flags + preferences to OpenAI
-    - Stores summary in mealplans table (plan_json)
-    - Returns JSON ready for AIMealPlanResponse
+    - Uses GPT to generate a 7-day meal plan in the EXACT structure used by MealPlanningScreen.tsx
+    - Saves the FULL response JSON into mealplans.plan_json
+    - Marks older mealplans for this user as inactive
+    - Returns the JSON (same as saved)
     """
-    # 1) Get user
     user = db.query(models.User).filter(models.User.id == payload.user_id).first()
     if not user:
         raise ValueError("User not found")
 
-    flags = payload.flags
-    prefs = payload.preferences
+    prefs = payload.preferences or schemas.MealPlanPreferences()
+    flags = payload.flags or {}
     language = (payload.language or "en").lower()
 
-    # 2) Language instruction
-    if language == "ar":
-        language_instruction = (
-            "All meal names, descriptions, tips, focus and overview MUST be written in MODERN STANDARD ARABIC. "
-            "Do NOT use Arabic written with Latin letters. Use clear Arabic sentences."
-        )
-    else:
-        language_instruction = (
-            "All meal names, descriptions, tips, focus and overview MUST be written in CLEAR, SIMPLE ENGLISH."
-        )
+    model_name = payload.model or "gpt-4.1"
 
-    # 3) System prompt: define JSON format
+    liked = _normalize_csv(prefs.liked_foods)
+    disliked = _normalize_csv(prefs.disliked_foods)
+    allergies = (prefs.allergies or "").strip()
+    diet_style = (prefs.diet_style or "").strip()
+    cuisine = (prefs.cuisine or "").strip()
+
+    meals_per_day = int(prefs.meals_per_day or 4)
+    cooking_time = (prefs.cooking_time or "quick").strip().lower()     # quick | medium | advanced
+    budget_level = (prefs.budget_level or "medium").strip().lower()    # low | medium | high
+
+    # if user set goal in prefs, prefer it; else use user.goal
+    goal = (prefs.goal or user.goal or "").strip()
+
+    if language == "ar":
+        lang_rule = (
+            "اكتب كل شيء باللغة العربية الفصحى (بدون عربليزي). "
+            "اكتب أسماء الوجبات والشرح والنصائح باللغة العربية."
+        )
+        disclaimer = "هذه الخطة للاسترشاد العام وليست نصيحة طبية. استشر مختصاً إذا لديك حالة صحية."
+        day_names = "Use Arabic day labels مثل: الاثنين، الثلاثاء..."
+    else:
+        lang_rule = "Write everything in clear simple English."
+        disclaimer = "This plan is general guidance, not medical advice. Consult a professional if you have a condition."
+        day_names = "Use English day labels: Monday...Sunday"
+
+    # system: enforce EXACT JSON structure (matching MealPlanningScreen types)
     system_prompt = f"""
 You are a professional sports nutrition coach for a fitness app.
-You MUST respond with valid JSON only, no extra text.
+Return VALID JSON ONLY. No markdown. No extra text.
 
-JSON format:
+You MUST return this exact JSON shape:
+
 {{
+  "meta": {{
+    "language": "en|ar",
+    "created_at": "ISO-8601 string",
+    "model": "string",
+    "prompt_version": "string",
+    "disclaimer": "string"
+  }},
   "daily_targets": {{
     "calories": number,
     "protein": number,
@@ -64,128 +89,174 @@ JSON format:
   }},
   "week": [
     {{
-      "day": "Monday",
-      "focus": "string, short description of the main focus of the day (e.g. 'High protein, moderate carbs for muscle gain')",
-      "overview": "string, 1–2 sentences summarizing the logic of the whole day",
-      "breakfast": "string",
-      "lunch": "string",
-      "dinner": "string",
-      "snacks": "string",
-      "tips": ["string", "..."],
-      "special_considerations": [
-        "string, explain how this day respects diabetes/obesity/allergies/preferences if relevant",
-        "string, more notes if needed"
-      ],
-      "macros": {{
+      "day": "string",
+      "why_this_day_works": "string",
+      "meals": {{
+        "breakfast": [MealOption, MealOption],
+        "lunch": [MealOption, MealOption],
+        "dinner": [MealOption, MealOption],
+        "snacks": [MealOption, MealOption]
+      }},
+      "totals": {{
         "calories": number,
-        "protein": number,
-        "carbs": number,
-        "fat": number,
-        "water_liters": number
-      }}
-    }},
-    ...
-  ]
+        "protein_g": number,
+        "carbs_g": number,
+        "fat_g": number
+      }},
+      "tips": ["string", "string"]
+    }}
+  ],
+  "grocery_list": {{
+    "proteins": ["..."],
+    "carbs": ["..."],
+    "vegetables_fruits": ["..."],
+    "dairy": ["..."],
+    "fats": ["..."],
+    "extras": ["..."]
+  }},
+  "meal_prep_plan": ["string", "string"]
 }}
 
-Rules:
-- Exactly 7 days in "week".
-- Use simple, realistic foods that are easy to find.
-- Adjust calories/macros based on goal (bulk/cut/maintain) and basic activity.
-- If diabetes is true -> prioritize low-GI carbs, avoid sugary drinks/desserts, and spread carbs through the day.
-- If obesity is true -> prioritize calorie control, high protein, high fiber, and portion control.
-- Water_liters should usually be between ~2.0 and 3.5 for a healthy adult, unless slightly adjusted by goal/activity.
-- Strongly prefer foods from "liked foods" and completely avoid foods from "disliked foods".
-- For each day, 'special_considerations' MUST highlight how the plan respects diabetes/obesity/allergies/preferences when relevant.
-- {language_instruction}
+MealOption shape:
+{{
+  "title": "string",
+  "ingredients": ["string", "..."],
+  "portions": "string",
+  "steps": ["string", "..."],
+  "macros": {{
+    "calories": number,
+    "protein_g": number,
+    "carbs_g": number,
+    "fat_g": number
+  }},
+  "swaps": ["string", "..."]
+}}
+
+Hard Rules:
+- week MUST have EXACTLY 7 days.
+- For each day:
+  - breakfast/lunch/dinner/snacks MUST each include 2 options (2 MealOption objects).
+- Make meals realistic and available in normal groceries.
+- Respect dislikes and allergies strictly (avoid them completely).
+- Strongly prefer liked foods when possible.
+- Diabetes true => prioritize low-GI carbs, avoid sugar drinks/desserts, spread carbs.
+- Obesity true => calorie control, high protein, high fiber, portion control.
+- cooking_time rule:
+  - quick: steps should be short, total cook time <= 20 minutes.
+  - medium: <= 35 minutes.
+  - advanced: <= 60 minutes (still practical).
+- budget_level rule:
+  - low: prefer cheaper protein (eggs, tuna, chicken, legumes).
+  - high: can include more salmon/steak etc.
+- Water liters typically between 2.0 and 3.5 (adjust to body size and goal).
+- {day_names}
+- {lang_rule}
 """
 
-    liked_foods = getattr(prefs, "liked_foods", None) if prefs else None
-    disliked_foods = getattr(prefs, "disliked_foods", None) if prefs else None
-
-    # 4) User prompt with actual data
     user_prompt = f"""
-User profile:
-- ID: {user.id}
-- Name: {user.first_name}
-- Age: {user.age}
-- Sex: {user.sex}
-- Height: {user.height_cm} cm
-- Weight: {user.weight_kg} kg
-- Goal: {user.goal}
-- BMI: {user.bmi}
-- BMR: {user.bmr}
-- Recommended water intake (L): {user.water_intake_l}
+User Profile:
+- id: {user.id}
+- name: {user.first_name}
+- sex: {user.sex}
+- age: {user.age}
+- height_cm: {user.height_cm}
+- weight_kg: {user.weight_kg}
+- goal: {goal}
+- bmi: {user.bmi}
+- bmr: {user.bmr}
+- recommended_water_liters: {user.water_intake_l}
 
-Flags:
-- Diabetes: {flags.diabetes}
-- Obesity: {flags.obesity}
+Health Flags:
+- diabetes: {bool(flags.get("diabetes"))}
+- obesity: {bool(flags.get("obesity"))}
 
-Preferences:
-- Diet style: {getattr(prefs, 'diet_style', None) if prefs else None}
-- Allergies: {getattr(prefs, 'allergies', None) if prefs else None}
-- Cuisine: {getattr(prefs, 'cuisine', None) if prefs else None}
-- Liked foods: {liked_foods}
-- Disliked foods: {disliked_foods}
+Meal Plan Inputs (from app screen):
+- language: {language}
+- meals_per_day: {meals_per_day}
+- cooking_time: {cooking_time}
+- budget_level: {budget_level}
+- diet_style: {diet_style or "none"}
+- cuisine: {cuisine or "no preference"}
+- allergies/intolerances: {allergies or "none"}
+- liked_foods: {liked or "none"}
+- disliked_foods: {disliked or "none"}
 
-Plan language: {"Arabic" if language == "ar" else "English"}.
-
-Generate a 7-day meal plan in the EXACT JSON format specified in the system message.
-Do not include any explanation outside the JSON.
+Generate the plan NOW.
+Meta requirements:
+- meta.language = "{language}"
+- meta.created_at = current ISO-8601 time
+- meta.model = "{model_name}"
+- meta.prompt_version = "{PROMPT_VERSION}"
+- meta.disclaimer = "{disclaimer}"
 """
 
     completion = client.chat.completions.create(
-        model="gpt-4.1-mini",  # ✅ cheap model
+        model=model_name,
         response_format={"type": "json_object"},
         messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "system", "content": system_prompt.strip()},
+            {"role": "user", "content": user_prompt.strip()},
         ],
         temperature=0.7,
     )
 
-    content = completion.choices[0].message.content
-    data = json.loads(content)  # dict
+    raw = completion.choices[0].message.content
+    data = json.loads(raw)
 
-    # 5) Save plan as MealPlan summary + JSON in DB
-    try:
-        week = data.get("week", [])
-        if week:
-            # Take macros from first day as a simple summary
-            m = week[0].get("macros", {})
-            new_plan = models.MealPlan(
-                user_id=user.id,
-                goal=user.goal,
-                calories=m.get("calories"),
-                protein=m.get("protein"),
-                carbs=m.get("carbs"),
-                fat=m.get("fat"),
-                plan_json=json.dumps(data),
-            )
-            db.add(new_plan)
-            db.commit()
-    except Exception as e:
-        print("Warning: failed to save AI meal plan:", e)
+    # Ensure meta exists (in case model forgets)
+    data.setdefault("meta", {})
+    data["meta"].setdefault("language", language)
+    data["meta"].setdefault("created_at", datetime.utcnow().isoformat() + "Z")
+    data["meta"].setdefault("model", model_name)
+    data["meta"].setdefault("prompt_version", PROMPT_VERSION)
+    data["meta"].setdefault("disclaimer", disclaimer)
+
+    # Save: mark old plans inactive, save new plan as active
+    db.query(models.MealPlan).filter(models.MealPlan.user_id == user.id).update({"is_active": False})
+    db.commit()
+
+    daily = data.get("daily_targets", {}) or {}
+
+    new_plan = models.MealPlan(
+        user_id=user.id,
+        goal=goal or user.goal,
+        diet_style=diet_style or None,
+        cuisine=cuisine or None,
+        meals_per_day=meals_per_day,
+        cooking_time=cooking_time,
+        budget_level=budget_level,
+        likes=liked or None,
+        dislikes=disliked or None,
+        allergies=allergies or None,
+        medical_flags=json.dumps({"diabetes": bool(flags.get("diabetes")), "obesity": bool(flags.get("obesity"))}),
+        language=language,
+        plan_duration_days=7,
+        calories=float(daily.get("calories", 0) or 0),
+        protein=float(daily.get("protein", 0) or 0),
+        carbs=float(daily.get("carbs", 0) or 0),
+        fat=float(daily.get("fat", 0) or 0),
+        water_liters=float(daily.get("water_liters", 0) or 0),
+        plan_json=json.dumps(data, ensure_ascii=False),
+        prompt_version=PROMPT_VERSION,
+        model=model_name,
+        is_active=True,
+        version=1,
+    )
+
+    db.add(new_plan)
+    db.commit()
+    db.refresh(new_plan)
 
     return data
 
 
-def get_latest_weekly_meal_plan(
-    db: Session,
-    user_id: int
-) -> Optional[Dict[str, Any]]:
-    """
-    Returns the latest saved AI meal plan JSON for a user
-    (the one saved in MealPlan.plan_json), or None if not found.
-    """
+def get_latest_weekly_meal_plan(db: Session, user_id: int) -> Optional[Dict[str, Any]]:
     plan = (
         db.query(models.MealPlan)
         .filter(models.MealPlan.user_id == user_id, models.MealPlan.plan_json != None)
         .order_by(models.MealPlan.created_at.desc())
         .first()
     )
-
     if not plan or not plan.plan_json:
         return None
-
     return json.loads(plan.plan_json)
