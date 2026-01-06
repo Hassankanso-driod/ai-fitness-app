@@ -9,8 +9,13 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
     env:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      ENV: test
+      JWT_SECRET_KEY: test_secret
+      SECRET_KEY: test_secret
+      DATABASE_URL: sqlite:///./database/fitness_ai.db
 
     services:
       mysql:
@@ -23,25 +28,19 @@ jobs:
         options: --health-cmd="mysqladmin ping" --health-interval=10s --health-timeout=5s --health-retries=3
 
     steps:
-    - uses: actions/checkout@v3
+      - uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
 
-    - name: Install dependencies
-      run: |
-        cd backend
-        pip install -r requirements.txt
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install -r requirements.txt
 
-    - name: Run tests
-      run: |
-        cd backend
-        pytest tests/ -v
-      env:
-        MYSQL_USER: root
-        MYSQL_PASSWORD: test_password
-        MYSQL_HOST: 127.0.0.1
-        MYSQL_DATABASE: fitness_ai_test
-
+      - name: Run tests
+        run: |
+          cd backend
+          pytest tests/ -v
